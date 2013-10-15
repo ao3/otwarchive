@@ -4,7 +4,6 @@ class AbuseReportsController < ApplicationController
   skip_before_filter :store_location
 
   # GET /abuse_reports/new
-  # GET /abuse_reports/new.xml
   def new
     @abuse_report = AbuseReport.new
     params[:url] ? @abuse_report.url = params[:url] : @abuse_report.url = request.env["HTTP_REFERER"]
@@ -17,28 +16,23 @@ class AbuseReportsController < ApplicationController
   end
 
   # POST /abuse_reports
-  # POST /abuse_reports.xml
   def create
     @abuse_report = AbuseReport.new(params[:abuse_report])
-    respond_to do |format|
-      if @abuse_report.save
-        require 'rest_client'
-        # Send bug to 16bugs
-        if ArchiveConfig.PERFORM_DELIVERIES == true && %w(staging production).include?(Rails.env)
-          site = RestClient::Resource.new(ArchiveConfig.BUGS_SITE, :user => ArchiveConfig.BUGS_USER, :password => ArchiveConfig.BUGS_PASSWORD)
-          site['/projects/4603/bugs'].post build_post_info(@abuse_report), :content_type => 'application/xml', :accept => 'application/xml'
-        end
-        # Email bug to feedback email address
-        AdminMailer.abuse_report(@abuse_report.id).deliver
-        # The user requested a copy of the Abuse Report, send it to them
-        if @abuse_report.email_copy?
-          UserMailer.abuse_report(@abuse_report.id).deliver
-        end
-        flash[:notice] = ts("Your abuse report was sent to the Abuse team.")
-        format.html { redirect_to '' }
-      else
-        format.html { render :action => "new" }
+    if @abuse_report.save
+      require 'rest_client'
+      # Send bug to 16bugs
+      if ArchiveConfig.PERFORM_DELIVERIES == true && %w(staging production).include?(Rails.env)
+        site = RestClient::Resource.new(ArchiveConfig.BUGS_SITE, :user => ArchiveConfig.BUGS_USER, :password => ArchiveConfig.BUGS_PASSWORD)
+        site['/projects/4603/bugs'].post build_post_info(@abuse_report), :content_type => 'application/xml', :accept => 'application/xml'
       end
+      # Email bug to feedback email address
+      AdminMailer.abuse_report(@abuse_report.id).deliver
+      # The user requested a copy of the Abuse Report, send it to them
+      if @abuse_report.email_copy?
+        UserMailer.abuse_report(@abuse_report.id).deliver
+      end
+      flash[:notice] = ts("Your abuse report was sent to the Abuse team.")
+      redirect_to ''
     end
   end
 
