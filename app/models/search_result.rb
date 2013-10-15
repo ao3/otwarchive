@@ -1,6 +1,7 @@
 class SearchResult
   
   include Enumerable
+  extend Forwardable
 
   attr_reader :klass, :tire_response
 
@@ -11,14 +12,13 @@ class SearchResult
     
   # Find results with where rather than find in order to avoid ActiveRecord::RecordNotFound
   def items
-    if @items.nil?
-      ids = tire_response.results.map { |item| item['id'] }
-      items = klass.where(:id => ids).group_by(&:id)
-      @items = ids.map{ |id| items[id.to_i] }.flatten.compact
-    end
-    @items
+    @items ||= items_from_response
   end
-  
+
+  def facets
+    @facets ||= facets_from_response(tire_response.facets)
+  end
+
   def each(&block)
     items.each(&block)
   end
@@ -39,54 +39,55 @@ class SearchResult
   def to_ary
     self
   end
-  
-  def facets
-    return if tire_response.facets.nil?
-    if @facets.nil?
-      @facets = {}
-      tire_response.facets.each_pair do |term, results|
-        @facets[term] = []
-        results = results['terms']
-        if Tag::TYPES.include?(term.classify) || term == 'tag'
-          ids = results.map{ |result| result['term'] }
-          tags = Tag.where(id: ids).group_by(&:id)
-          results.each do |facet|
-            unless tags[facet['term'].to_i].blank?
-              @facets[term] << SearchFacet.new(facet['term'], tags[facet['term'].to_i].first.name, facet['count'])
-            end
-          end
-        elsif term == 'collections'
-          ids = results.map{ |result| result['term'] }
-          collections = Collection.where(id: ids).group_by(&:id)
-          results.each do |facet|
-            unless collections[facet['term'].to_i].blank?
-              @facets[term] << SearchFacet.new(facet['term'], collections[facet['term'].to_i].first.title, facet['count'])
-            end
-          end
-        end
+
+  def_delegators :@tire_response, :total_pages, :total_entries, :per_page, :offset, :current_page
+
+  private
+
+  #############
+  # ITEMS #####
+  #############
+
+  # We step through the items array in order to preserve the original response order
+  def items_from_response
+    ids = item_ids
+    items = klass.where(:id => ids).group_by(&:id)
+    ordered_items(ids, items)
+  end
+
+  def item_ids
+    tire_response.results.map { |item| item['id'] }
+  end
+
+  def ordered_items(ids, items)
+    ids.map{ |id| items[id.to_i] }.flatten.compact
+  end
+
+  #############
+  # FACETS ####
+  #############
+
+  # Given a response facets hash
+  # create a hash with the key being the category ('character', 'fandom')
+  # and the value being an array of search result objects
+  def facets_from_response(facets)
+    return if facets.nil?
+    {}.tap {|hash| facets.each{|term, results| hash[term] = facets_for_term(term, results['terms'])}}
+  end
+
+  # As with items, loop through the results list in order to maintain order
+  def facets_for_term(term, results)
+    facets = []
+    klass = term.classify.constantize
+    ids = results.map{ |result| result['term'] }
+    facet_objects = klass.where(id: ids).group_by(&:id)
+    results.each do |facet|
+      id = facet['term'].to_i
+      unless facet_objects[id].blank?
+        facets << SearchFacet.new(id.to_s, facet_objects[id].first.label, facet['count'])
       end
     end
-    @facets
-  end
-  
-  def total_pages
-    tire_response.total_pages
-  end
-  
-  def total_entries
-    tire_response.total_entries
-  end
-  
-  def per_page
-    tire_response.per_page
-  end
-  
-  def offset
-    tire_response.offset
-  end
-  
-  def current_page
-    tire_response.current_page
+    facets
   end
   
 end
